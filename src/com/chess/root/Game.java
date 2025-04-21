@@ -377,16 +377,31 @@ public class Game {
 		this.isOnlineGame = true;
 		manager.setGame(this);
 		
-		 // Set the player colors based on host status
+		// Set player control based on host status
 		boolean isHost = manager.isHost();
+		
 		if (isHost) {
-			// Host plays as white
+			// Host always plays as white
 			whitePlayer.setIsLocal(true);
 			blackPlayer.setIsLocal(false);
+			// Make sure the first turn is white's
+			if (currentPlayer.equals(blackPlayer)) {
+				// If black was set to play first, fix it
+				currentPlayer = whitePlayer;
+				board.setPlayerColor(false); // false = white plays
+			}
+			controller.setDisplay("White's turn (your move)");
 		} else {
-			// Client plays as black
+			// Client always plays as black
 			whitePlayer.setIsLocal(false);
 			blackPlayer.setIsLocal(true);
+			// Make sure the first turn is white's (opponent's turn)
+			if (currentPlayer.equals(blackPlayer)) {
+				// If black was set to play first, fix it
+				currentPlayer = whitePlayer;
+				board.setPlayerColor(false); // false = white plays
+			}
+			controller.setDisplay("White's turn (opponent's move)");
 		}
 		
 		// Start network listener
@@ -460,13 +475,18 @@ public class Game {
 			// In non-online games, AI can't manually move
 			return !currentPlayer.isAI();
 		} else {
-			// In online games, check if it's the player's turn based on host status
-			boolean isPlayerWhite = !networkManager.isHost(); // Client is black
-			boolean isWhiteTurn = !blackPlayer.equals(currentPlayer);
+			// In online games:
+			boolean isHost = networkManager.isHost();
+			boolean isWhiteTurn = !blackPlays();
 			
-			// Player can only move if it's their color's turn
-			return (isPlayerWhite == isWhiteTurn);
+			// Host plays white, client plays black
+			return (isHost && isWhiteTurn) || (!isHost && !isWhiteTurn);
 		}
+	}
+
+	// Add this helper method
+	private boolean blackPlays() {
+		return currentPlayer.equals(blackPlayer);
 	}
 	
 	public NetworkManager getNetworkManager() {

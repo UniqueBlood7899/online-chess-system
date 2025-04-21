@@ -1055,4 +1055,9 @@ public class Board {
 				return new Move(piece, targetField, victim);
 		}
 	}
+
+	// Add this method to allow changing the active player color
+	public void setPlayerColor(boolean blackPlays) {
+	    this.blackPlays = blackPlays;
+	}
 }
