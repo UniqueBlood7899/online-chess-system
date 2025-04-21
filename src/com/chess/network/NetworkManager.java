@@ -5,6 +5,7 @@ import java.net.*;
 import com.chess.root.moves.Move;
 import com.chess.model.Setting;
 import com.chess.root.Game;
+import com.chess.root.Board; // Add this import
 import com.chess.root.pieces.Piece;
 import com.chess.root.Field;
 import java.util.logging.Level;
