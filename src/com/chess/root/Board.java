@@ -1056,6 +1056,39 @@ public class Board {
 		}
 	}
 
+	// Add this overloaded createMove method for network moves
+	public Move createMove(String moveType, Piece piece, Field targetField, Piece victim) {
+	    // Create the appropriate type of move based on the moveType
+	    switch (moveType) {
+	        case "CastlingMove":
+	            // Handle castling move
+	            int rookCol = targetField.getColumn() > piece.getColumn() ? 7 : 0;
+	            int rookRow = piece.getRow();
+	            Piece rook = getField(rookCol, rookRow).getPiece();
+	            int rookTargetCol = targetField.getColumn() > piece.getColumn() ? 
+	                targetField.getColumn() - 1 : targetField.getColumn() + 1;
+	            Field rookTargetField = getField(rookTargetCol, rookRow);
+	            return new CastlingMove(piece, rook, targetField, rookTargetField);
+	            
+	        case "PromotionMove":
+	            // Handle promotion move
+	            QueenPiece queen = new QueenPiece(this, targetField, piece.getColor(), false);
+	            return new PromotionMove(piece, queen, targetField, victim);
+	            
+	        case "PassingMove":
+	            // Handle en passant move
+	            return new PassingMove(piece, targetField, victim);
+	            
+	        case "PawnRunMove":
+	            // Handle pawn's initial double move
+	            return new PawnRunMove(piece, targetField, victim);
+	            
+	        default:
+	            // Regular move
+	            return new Move(piece, targetField, victim);
+	    }
+	}
+
 	// Add this method to allow changing the active player color
 	public void setPlayerColor(boolean blackPlays) {
 	    this.blackPlays = blackPlays;

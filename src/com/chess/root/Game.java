@@ -373,65 +373,61 @@ public class Game {
 	}
 
 	public void setNetworkManager(NetworkManager manager) {
-		this.networkManager = manager;
-		this.isOnlineGame = true;
-		manager.setGame(this);
-		
-		// Set player control based on host status
-		boolean isHost = manager.isHost();
-		
-		if (isHost) {
-			// Host always plays as white
-			whitePlayer.setIsLocal(true);
-			blackPlayer.setIsLocal(false);
-			// Make sure the first turn is white's
-			if (currentPlayer.equals(blackPlayer)) {
-				// If black was set to play first, fix it
-				currentPlayer = whitePlayer;
-				board.setPlayerColor(false); // false = white plays
-			}
-			controller.setDisplay("White's turn (your move)");
-		} else {
-			// Client always plays as black
-			whitePlayer.setIsLocal(false);
-			blackPlayer.setIsLocal(true);
-			// Make sure the first turn is white's (opponent's turn)
-			if (currentPlayer.equals(blackPlayer)) {
-				// If black was set to play first, fix it
-				currentPlayer = whitePlayer;
-				board.setPlayerColor(false); // false = white plays
-			}
-			controller.setDisplay("White's turn (opponent's move)");
-		}
-		
-		// Start network listener
-		startNetworkListener();
+	    this.networkManager = manager;
+	    this.isOnlineGame = true;
+	    manager.setGame(this);
+	    
+	    // Always ensure host is white and client is black
+	    boolean isHost = manager.isHost();
+	    
+	    if (isHost) {
+	        // Host always plays as white
+	        whitePlayer.setIsLocal(true);
+	        blackPlayer.setIsLocal(false);
+	        // Make sure the first turn is white's
+	        currentPlayer = whitePlayer;
+	        board.setPlayerColor(false); // false = white plays
+	        controller.setDisplay("White's turn (your move)");
+	    } else {
+	        // Client always plays as black
+	        whitePlayer.setIsLocal(false);
+	        blackPlayer.setIsLocal(true);
+	        // Make sure the first turn is white's (opponent's turn)
+	        currentPlayer = whitePlayer;
+	        board.setPlayerColor(false); // false = white plays
+	        controller.setDisplay("White's turn (opponent's move)");
+	    }
+	    
+	    // Start network listener only after setup is complete
+	    startNetworkListener();
 	}
 
 	private void startNetworkListener() {
-		if (networkManager != null && networkManager.isConnected()) {
-			new Thread(() -> {
-				try {
-					while (networkManager.isConnected()) {
-						final Move move = networkManager.receiveMove();
-						if (move != null) {
-							Platform.runLater(() -> {
-								// Execute opponent's move on our board
-								board.executeMove(move);
-								board.endMove();
-								controller.setDisplay(getPlayer().toString() + "'s turn"); // Update UI after receiving move
-							});
-						} else {
-							break; // Exit if null move received (error occurred)
-						}
-					}
-				} catch (Exception e) {
-					Platform.runLater(() -> {
-						controller.setDisplay("Connection error: " + e.getMessage());
-					});
-				}
-			}).start();
-		}
+	    if (networkManager != null && networkManager.isConnected()) {
+	        new Thread(() -> {
+	            try {
+	                while (networkManager.isConnected()) {
+	                    final Move move = networkManager.receiveMove();
+	                    if (move != null) {
+	                        Platform.runLater(() -> {
+	                            // Execute the opponent's move on our board
+	                            board.executeMove(move);
+	                            // Complete the move process
+	                            board.endMove();
+	                            // Update the UI
+	                            controller.setDisplay(getPlayer().toString() + "'s turn");
+	                        });
+	                    } else {
+	                        break; // Exit if null move received (error occurred)
+	                    }
+	                }
+	            } catch (Exception e) {
+	                Platform.runLater(() -> {
+	                    controller.setDisplay("Connection error: " + e.getMessage());
+	                });
+	            }
+	        }).start();
+	    }
 	}
 
 	public void handleDisconnection() {
@@ -441,47 +437,45 @@ public class Game {
 	}
 
 	public void executeNetworkMove(Move move) {
-		if (networkManager != null && networkManager.isConnected()) {
-			try {
-				// Execute move locally first
-				board.executeMove(move);
-				
-				// Then send to opponent
-				networkManager.sendMove(move);
-				
-				// Complete move process
-				board.endMove();
-				
-				// Update the display to indicate opponent's turn
-				controller.setDisplay(getPlayer().toString() + "'s turn");
-			} catch (Exception e) {
-				LOG.log(Level.SEVERE, "Failed to send move: {0}", e.getMessage());
-				controller.setDisplay("Failed to send move: " + e.getMessage());
-			}
-		} else {
-			// Non-network move
-			board.executeMove(move);
-			board.endMove();
-		}
+	    if (networkManager != null && networkManager.isConnected()) {
+	        try {
+	            // Execute move locally first
+	            board.executeMove(move);
+	            
+	            // Send move to opponent
+	            networkManager.sendMove(move);
+	            
+	            // Complete move process
+	            board.endMove();
+	            
+	        } catch (Exception e) {
+	            LOG.log(Level.SEVERE, "Failed to send move: {0}", e.getMessage());
+	            controller.setDisplay("Failed to send move: " + e.getMessage());
+	        }
+	    } else {
+	        // Non-network move
+	        board.executeMove(move);
+	        board.endMove();
+	    }
 	}
 
 	public boolean isOnlineGame() {
 		return isOnlineGame;
 	}
 	
-	// Add this method to check if the current player can make a move
+	// Replace the canPlayerMove method with this correct version
 	public boolean canPlayerMove() {
-		if (!isOnlineGame) {
-			// In non-online games, AI can't manually move
-			return !currentPlayer.isAI();
-		} else {
-			// In online games:
-			boolean isHost = networkManager.isHost();
-			boolean isWhiteTurn = !blackPlays();
-			
-			// Host plays white, client plays black
-			return (isHost && isWhiteTurn) || (!isHost && !isWhiteTurn);
-		}
+	    if (!isOnlineGame) {
+	        // In non-online games, human players can move during their turn
+	        return !currentPlayer.isAI();
+	    } else {
+	        // In online games, determine if it's this player's turn
+	        boolean isHost = networkManager.isHost();
+	        boolean isWhiteTurn = currentPlayer.equals(whitePlayer);
+	        
+	        // Host plays white, client plays black
+	        return (isHost && isWhiteTurn) || (!isHost && !isWhiteTurn);
+	    }
 	}
 
 	// Add this helper method
