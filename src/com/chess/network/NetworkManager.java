@@ -105,29 +105,72 @@ public class NetworkManager {
                 Field startField = board.getField(moveData.startCol, moveData.startRow);
                 Field targetField = board.getField(moveData.targetCol, moveData.targetRow);
                 
+                if (startField == null || targetField == null) {
+                    LOG.log(Level.SEVERE, "Invalid field coordinates received");
+                    return null;
+                }
+                
                 // Get pieces
                 Piece piece = startField.getPiece();
                 Piece victim = targetField.getPiece();
                 
                 // If piece is null (already moved), find a piece of that type that can move to the target
                 if (piece == null) {
-                    for (Piece p : board.getPieces(!isHost)) { // Host is white, client is black
+                    LOG.log(Level.WARNING, "Piece not found at starting position, trying to find matching piece");
+                    // Determine color of piece to search for - host is white, client is black
+                    boolean pieceColor = isHost; // If host is receiving, then looking for black piece
+                    
+                    // Search all pieces of the right color
+                    for (Piece p : board.getPieces(pieceColor)) {
                         if (p.canMoveTo(targetField)) {
                             piece = p;
+                            LOG.log(Level.INFO, "Found alternative piece that can make the move");
                             break;
                         }
+                    }
+                    
+                    if (piece == null) {
+                        LOG.log(Level.SEVERE, "No piece found that can make the move");
+                        return null;
                     }
                 }
                 
                 // Create the move based on the data
-                Move move = board.createMove(moveData.moveType, piece, targetField, victim);
-                return move;
+                String moveType = moveData.moveType;
+                if (moveType == null || moveType.isEmpty()) {
+                    moveType = "Move"; // Default to regular move
+                }
+                
+                try {
+                    Move move = board.createMove(moveType, piece, targetField, victim);
+                    if (move == null) {
+                        LOG.log(Level.SEVERE, "Could not create move of type: {0}", moveType);
+                        return null;
+                    }
+                    return move;
+                } catch (Exception e) {
+                    LOG.log(Level.SEVERE, "Error creating move: {0}", e.getMessage());
+                    return null;
+                }
             } else {
-                LOG.log(Level.SEVERE, "Received object is not a MoveData");
+                LOG.log(Level.SEVERE, "Received object is not a MoveData: {0}", 
+                        receivedObj != null ? receivedObj.getClass().getName() : "null");
                 return null;
             }
+        } catch (EOFException e) {
+            LOG.log(Level.WARNING, "Connection closed by peer");
+            handleDisconnect();
+            return null;
+        } catch (SocketException e) {
+            LOG.log(Level.WARNING, "Socket error: {0}", e.getMessage());
+            handleDisconnect();
+            return null;
         } catch (IOException | ClassNotFoundException e) {
             LOG.log(Level.SEVERE, "Failed to receive move: {0}", e.getMessage());
+            handleDisconnect();
+            return null;
+        } catch (Exception e) {
+            LOG.log(Level.SEVERE, "Unexpected error: {0}", e.getMessage());
             handleDisconnect();
             return null;
         }
