@@ -158,17 +158,25 @@ public class NetworkManager {
                 LOG.log(Level.INFO, "Waiting for move...");
                 Object received = in.readObject();
                 
-                // Handle keep-alive PING messages
+                // Handle keep-alive messages
                 if (received instanceof String) {
                     String message = (String) received;
                     if ("PING".equals(message)) {
+                        LOG.log(Level.FINE, "Received PING, sending PONG");
                         synchronized (out) {
                             out.writeObject("PONG");
                             out.flush();
                             out.reset();
-                            LOG.log(Level.FINE, "Sent PONG response");
                         }
                         // Recursively try to receive the actual move
+                        return receiveMove();
+                    } else if ("PONG".equals(message)) {
+                        LOG.log(Level.FINE, "Received PONG response, continuing to wait for move");
+                        // This is a PONG response to our PING, keep waiting for the actual move
+                        return receiveMove();
+                    } else {
+                        LOG.log(Level.WARNING, "Received unexpected string message: {0}", message);
+                        // For any other string message, keep waiting for the actual move
                         return receiveMove();
                     }
                 }
@@ -374,8 +382,9 @@ public class NetworkManager {
                         
                         if (connected && socket != null && !socket.isClosed() && out != null) {
                             boolean pongReceived = false;
+                            
+                            // Send ping with proper synchronization
                             synchronized (out) {
-                                // Send a ping message
                                 out.writeObject("PING");
                                 out.flush();
                                 out.reset();
@@ -383,24 +392,49 @@ public class NetworkManager {
                             }
                             
                             // Wait for PONG response with timeout
-                            try {
-                                synchronized (in) {
-                                    socket.setSoTimeout(3000); // 3 second timeout for pong
-                                    Object response = in.readObject();
-                                    if (response instanceof String && "PONG".equals(response)) {
-                                        pongReceived = true;
-                                        missedPongs = 0;
-                                        LOG.log(Level.FINE, "Received PONG response");
+                            long startTime = System.currentTimeMillis();
+                            long timeoutMillis = 3000; // 3 second timeout
+                            
+                            while (System.currentTimeMillis() - startTime < timeoutMillis && !pongReceived) {
+                                try {
+                                    synchronized (in) {
+                                        socket.setSoTimeout(1000); // 1 second read timeout
+                                        Object response = in.readObject();
+                                        if (response instanceof String) {
+                                            String message = (String) response;
+                                            if ("PONG".equals(message)) {
+                                                pongReceived = true;
+                                                missedPongs = 0;
+                                                LOG.log(Level.FINE, "Received PONG response");
+                                                break;
+                                            } else if ("PING".equals(message)) {
+                                                // If we receive a PING while waiting for PONG,
+                                                // respond immediately and continue waiting
+                                                synchronized (out) {
+                                                    out.writeObject("PONG");
+                                                    out.flush();
+                                                    out.reset();
+                                                    LOG.log(Level.FINE, "Sent PONG response while waiting");
+                                                }
+                                            }
+                                            // For any other message, ignore and keep waiting
+                                        }
                                     }
+                                } catch (SocketTimeoutException e) {
+                                    // Normal timeout, continue waiting if we still have time
+                                    continue;
+                                } catch (Exception e) {
+                                    LOG.log(Level.WARNING, "Error while waiting for PONG: {0}", e.getMessage());
+                                    break;
                                 }
-                            } catch (Exception e) {
-                                LOG.log(Level.WARNING, "No PONG response received");
-                            } finally {
-                                socket.setSoTimeout(0); // Reset to infinite timeout
                             }
+                            
+                            // Reset socket timeout
+                            socket.setSoTimeout(0);
                             
                             if (!pongReceived) {
                                 missedPongs++;
+                                LOG.log(Level.WARNING, "No PONG response received, missed count: {0}", missedPongs);
                                 if (missedPongs >= 3) {
                                     LOG.log(Level.SEVERE, "Lost connection - no PONG responses");
                                     handleDisconnect();
@@ -422,6 +456,12 @@ public class NetworkManager {
                 }
             } catch (Exception e) {
                 LOG.log(Level.SEVERE, "Keep-alive thread error: {0}", e.getMessage());
+            } finally {
+                try {
+                    socket.setSoTimeout(0); // Make sure to reset timeout
+                } catch (Exception e) {
+                    // Ignore
+                }
             }
             LOG.log(Level.INFO, "Keep-alive thread stopped");
         });
