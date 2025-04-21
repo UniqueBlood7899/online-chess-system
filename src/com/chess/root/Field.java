@@ -1,5 +1,6 @@
 package com.chess.root;
 
+import java.io.Serializable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.logging.Level;
@@ -10,8 +11,8 @@ import javafx.application.Platform;
 import javafx.scene.control.Button;
 import javafx.scene.image.ImageView;
 
-public class Field {
-	private FieldButton button;
+public class Field implements Serializable { // Implement Serializable
+	private transient FieldButton button; // Mark button as transient
 	private int column;
 	private int row;
 	private boolean isBlack = false;
