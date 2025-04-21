@@ -480,23 +480,27 @@ public class Game {
 	}
 
 	public void executeNetworkMove(Move move) {
+	    // First execute move locally regardless of network status
+	    try {
+	        LOG.log(Level.INFO, "Executing local move: {0}", move.getNotation());
+	        board.executeMove(move);
+	        board.endMove();
+	    } catch (Exception e) {
+	        LOG.log(Level.SEVERE, "Failed to execute move locally: {0}", e.getMessage());
+	        controller.setDisplay("Error: " + e.getMessage());
+	        return;
+	    }
+	    
+	    // Then handle network if this is an online game
 	    if (networkManager != null && networkManager.isConnected()) {
 	        try {
-	            LOG.log(Level.INFO, "Executing local move: {0}", move.getNotation());
-	            
-	            // Execute move locally first
-	            board.executeMove(move);
-	            
-	            // Add endMove to update the move counter
-	            board.endMove();
-	            
 	            // Send move to opponent
 	            boolean sendSuccessful = true;
 	            try {
 	                networkManager.sendMove(move);
 	            } catch (Exception e) {
 	                LOG.log(Level.SEVERE, "Failed to send move: {0}", e.getMessage());
-	                controller.setDisplay("Failed to send move: " + e.getMessage());
+	                controller.setDisplay("Move executed locally, but failed to send to opponent: " + e.getMessage());
 	                sendSuccessful = false;
 	            }
 	            
@@ -508,24 +512,35 @@ public class Game {
 	            String displayText;
 	            if (sendSuccessful) {
 	                displayText = currentPlayer.toString() + "'s turn (opponent's move)";
-	            } else {
-	                displayText = "Network error - move not sent";
-	            }
-	            controller.setDisplay(displayText);
-	            
-	            // Start listening for opponent's move ONLY if send was successful
-	            if (sendSuccessful) {
+	                controller.setDisplay(displayText);
+	                
+	                // Start listening for opponent's move ONLY if send was successful
 	                startNetworkListener();
+	            } else {
+	                displayText = "Network error - move executed locally but not sent to opponent";
+	                controller.setDisplay(displayText);
+	                
+	                // Try to recover the connection
+	                new Thread(() -> {
+	                    try {
+	                        Thread.sleep(2000); // Wait briefly
+	                        if (networkManager != null && networkManager.isConnected()) {
+	                            // Try listening again if we're still connected
+	                            startNetworkListener();
+	                        }
+	                    } catch (InterruptedException ie) {
+	                        // Ignore
+	                    }
+	                }).start();
 	            }
-	            
 	        } catch (Exception e) {
-	            LOG.log(Level.SEVERE, "Failed to execute network move: {0}", e.getMessage());
-	            controller.setDisplay("Failed to execute move: " + e.getMessage());
+	            LOG.log(Level.SEVERE, "Failed to process network move: {0}", e.getMessage());
+	            controller.setDisplay("Move executed, but network error occurred: " + e.getMessage());
 	        }
 	    } else {
-	        // Non-network move
-	        board.executeMove(move);
-	        board.endMove();
+	        // For completeness, handle the case where this method is called for a non-network game
+	        // We've already executed the move at the start of this method
+	        LOG.log(Level.INFO, "Move executed in non-network game");
 	    }
 	}
 

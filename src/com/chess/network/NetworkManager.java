@@ -21,6 +21,7 @@ public class NetworkManager {
     private boolean connected = false;
     private Game game;
     private static final Logger LOG = Logger.getLogger(NetworkManager.class.getName());
+    private Thread keepAliveThread;
     
     public boolean hostGame() {
         try {
@@ -40,6 +41,7 @@ public class NetworkManager {
             setupStreams();
             isHost = true;
             connected = true;
+            startKeepAlive();
             LOG.log(Level.INFO, "Opponent connected from {0}", socket.getInetAddress().getHostAddress());
             return true;
         } catch (IOException e) {
@@ -55,6 +57,7 @@ public class NetworkManager {
             setupStreams();
             isHost = false;
             connected = true;
+            startKeepAlive();
             LOG.log(Level.INFO, "Connected to host successfully");
             return true;
         } catch (IOException e) {
@@ -64,10 +67,36 @@ public class NetworkManager {
     }
     
     private void setupStreams() throws IOException {
-        out = new ObjectOutputStream(socket.getOutputStream());
-        out.flush();
-        in = new ObjectInputStream(socket.getInputStream());
-        LOG.log(Level.INFO, "Network streams established");
+        try {
+            // Close existing streams if they exist
+            if (out != null) {
+                try {
+                    out.close();
+                } catch (Exception e) {
+                    LOG.log(Level.WARNING, "Error closing output stream: {0}", e.getMessage());
+                }
+            }
+            
+            if (in != null) {
+                try {
+                    in.close();
+                } catch (Exception e) {
+                    LOG.log(Level.WARNING, "Error closing input stream: {0}", e.getMessage());
+                }
+            }
+            
+            // Create new streams
+            out = new ObjectOutputStream(socket.getOutputStream());
+            out.flush();
+            in = new ObjectInputStream(socket.getInputStream());
+            LOG.log(Level.INFO, "Network streams established");
+        } catch (IOException e) {
+            LOG.log(Level.SEVERE, "Failed to setup streams: {0}", e.getMessage());
+            // Nullify streams on error to prevent using corrupted streams
+            out = null;
+            in = null;
+            throw e;
+        }
     }
     
     public void sendMove(Move move) {
@@ -82,9 +111,29 @@ public class NetworkManager {
             );
             
             LOG.log(Level.INFO, "Sending move: {0}", move.getNotation());
-            out.writeObject(moveData);
-            out.flush();
-        } catch (IOException e) {
+            
+            // Ensure the connection is stable before sending
+            if (socket != null && socket.isConnected() && !socket.isClosed()) {
+                try {
+                    // Check output stream
+                    if (out == null) {
+                        setupStreams();
+                    }
+                    
+                    out.writeObject(moveData);
+                    out.flush();
+                    out.reset(); // This is important to prevent caching of objects
+                    
+                    LOG.log(Level.INFO, "Move sent successfully");
+                } catch (IOException e) {
+                    LOG.log(Level.SEVERE, "Failed while writing to stream: {0}", e.getMessage());
+                    handleDisconnect();
+                }
+            } else {
+                LOG.log(Level.SEVERE, "Cannot send move: socket is not connected");
+                handleDisconnect();
+            }
+        } catch (Exception e) {
             LOG.log(Level.SEVERE, "Failed to send move: {0}", e.getMessage());
             handleDisconnect();
         }
@@ -93,7 +142,33 @@ public class NetworkManager {
     public Move receiveMove() {
         try {
             LOG.log(Level.INFO, "Waiting for move...");
+            
+            // Ensure socket is connected
+            if (socket == null || !socket.isConnected() || socket.isClosed()) {
+                LOG.log(Level.SEVERE, "Cannot receive move: socket is not connected");
+                handleDisconnect();
+                return null;
+            }
+            
+            // Check if input stream needs to be reset
+            if (in == null) {
+                try {
+                    setupStreams();
+                } catch (IOException e) {
+                    LOG.log(Level.SEVERE, "Failed to setup streams: {0}", e.getMessage());
+                    handleDisconnect();
+                    return null;
+                }
+            }
+            
             Object receivedObj = in.readObject();
+            
+            // Handle ping messages from keep-alive
+            if (receivedObj instanceof String && "PING".equals(receivedObj)) {
+                LOG.log(Level.FINE, "Received keep-alive ping");
+                // This is a keep-alive ping, not a move - recursively try again
+                return receiveMove();
+            }
             
             if (receivedObj instanceof MoveData) {
                 MoveData moveData = (MoveData)receivedObj;
@@ -147,6 +222,7 @@ public class NetworkManager {
                         LOG.log(Level.SEVERE, "Could not create move of type: {0}", moveType);
                         return null;
                     }
+                    LOG.log(Level.INFO, "Move processed successfully");
                     return move;
                 } catch (Exception e) {
                     LOG.log(Level.SEVERE, "Error creating move: {0}", e.getMessage());
@@ -221,10 +297,49 @@ public class NetworkManager {
     
     public void close() throws IOException {
         connected = false;
-        if (out != null) out.close();
-        if (in != null) in.close();
-        if (socket != null) socket.close();
-        if (serverSocket != null) serverSocket.close();
+        
+        // Stop keep-alive thread
+        stopKeepAlive();
+        
+        // Close streams first
+        if (out != null) {
+            try {
+                out.close();
+            } catch (IOException e) {
+                LOG.log(Level.WARNING, "Error closing output stream: {0}", e.getMessage());
+            }
+            out = null;
+        }
+        
+        if (in != null) {
+            try {
+                in.close();
+            } catch (IOException e) {
+                LOG.log(Level.WARNING, "Error closing input stream: {0}", e.getMessage());
+            }
+            in = null;
+        }
+        
+        // Close socket next
+        if (socket != null) {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                LOG.log(Level.WARNING, "Error closing socket: {0}", e.getMessage());
+            }
+            socket = null;
+        }
+        
+        // Close server socket last
+        if (serverSocket != null) {
+            try {
+                serverSocket.close();
+            } catch (IOException e) {
+                LOG.log(Level.WARNING, "Error closing server socket: {0}", e.getMessage());
+            }
+            serverSocket = null;
+        }
+        
         LOG.log(Level.INFO, "Network connection closed");
     }
     
@@ -243,6 +358,63 @@ public class NetworkManager {
             this.targetCol = targetCol;
             this.targetRow = targetRow;
             this.moveType = moveType;
+        }
+    }
+    
+    // Add a keep-alive mechanism to prevent connection timeout
+    private void startKeepAlive() {
+        // Stop any existing keep-alive thread
+        stopKeepAlive();
+        
+        // Start a new keep-alive thread
+        keepAliveThread = new Thread(() -> {
+            try {
+                while (connected && socket != null && !socket.isClosed()) {
+                    try {
+                        // Send a ping every 10 seconds
+                        Thread.sleep(10000);
+                        
+                        if (connected && socket != null && !socket.isClosed() && out != null) {
+                            synchronized (out) {
+                                // Send a ping message to keep the connection alive
+                                out.writeObject("PING");
+                                out.flush();
+                                out.reset();
+                                LOG.log(Level.FINE, "Sent keep-alive ping");
+                            }
+                        }
+                    } catch (InterruptedException e) {
+                        // Thread interrupted, exit
+                        break;
+                    } catch (IOException e) {
+                        LOG.log(Level.WARNING, "Keep-alive failed: {0}", e.getMessage());
+                        if (connected) {
+                            // Only handle disconnect if we're supposed to be connected
+                            handleDisconnect();
+                        }
+                        break;
+                    }
+                }
+            } catch (Exception e) {
+                LOG.log(Level.SEVERE, "Keep-alive thread error: {0}", e.getMessage());
+            }
+            LOG.log(Level.FINE, "Keep-alive thread stopped");
+        });
+        
+        keepAliveThread.setDaemon(true);
+        keepAliveThread.start();
+        LOG.log(Level.FINE, "Keep-alive thread started");
+    }
+    
+    private void stopKeepAlive() {
+        if (keepAliveThread != null && keepAliveThread.isAlive()) {
+            keepAliveThread.interrupt();
+            try {
+                keepAliveThread.join(1000); // Wait up to 1 second for thread to end
+            } catch (InterruptedException e) {
+                // Ignore
+            }
+            keepAliveThread = null;
         }
     }
 }
