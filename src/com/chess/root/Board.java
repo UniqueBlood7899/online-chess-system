@@ -99,7 +99,8 @@ public class Board {
 	// ---------------------------------- MANUAL GAMEPLAY ----------------------------------
 	
 	public void performManualMove(MouseEvent event) {  
-		if (!getPlayer().isAI()) {
+		// Check if the current player can move
+		if (game.canPlayerMove()) {
 			FieldButton button = (FieldButton) event.getSource();
 			Field field = button.getField();
 			if (isNextMoveUnlocked) {	
@@ -131,7 +132,7 @@ public class Board {
 	}
 	
 	public void performManualDrag(MouseEvent event) {	
-		if (!getPlayer().isAI()) {
+		if (game.canPlayerMove()) {
 			FieldButton button = (FieldButton) event.getSource();
 			Field field = button.getField();
 			if (isNextMoveUnlocked) {	
@@ -155,7 +156,7 @@ public class Board {
 	}
 	
 	public void performManualDrop(DragEvent event) {  
-		if (!getPlayer().isAI()) {
+		if (game.canPlayerMove()) {
 			FieldButton button = (FieldButton) event.getSource();
 			Field field = button.getField();
 			if (!isNextMoveUnlocked) {
@@ -186,30 +187,48 @@ public class Board {
 	// ---------------------------------- MANUAL GAMEPLAY LOGIC HANDLING ONLY ----------------------------------
 	
 	private boolean canPieceMove(Piece piece) {
-		if (piece == null) {
-			LOG.log(Level.INFO, "SYSTEM: (no piece)");
-			return false;
-		}
-		if (piece.isBlack() != blackPlays) {
-			LOG.log(Level.INFO, "SYSTEM: (wrong color)");
-			return false;
-		}
-		boolean found = false;
-		List<Move> touchedMoved = new LinkedList<>();
-		if (!currentMoves.isEmpty()) {
-			for (Move m : currentMoves) {
-				if (m.getPiece().equals(piece)) {
-					touchedMoved.add(m);
-					found = true;
-				}
-			}
-		}
-		if (!found) {
-			LOG.log(Level.INFO, "SYSTEM: (not allowed to move)");
-		} else if (touchedMovedEnabled) {
-			currentMoves = touchedMoved;
-		}
-		return found;
+	    if (piece == null) {
+	        LOG.log(Level.INFO, "SYSTEM: (no piece)");
+	        return false;
+	    }
+	    
+	    // Check if it's the right color's turn
+	    if (piece.isBlack() != blackPlays) {
+	        LOG.log(Level.INFO, "SYSTEM: (wrong color)");
+	        return false;
+	    }
+	    
+	    // For online games, ensure player can only move their own pieces
+	    if (game.isOnlineGame()) {
+	        boolean isHost = game.getNetworkManager().isHost();
+	        boolean isPieceWhite = !piece.isBlack();
+	        
+	        // Host plays white, client plays black
+	        if ((isHost && !isPieceWhite) || (!isHost && isPieceWhite)) {
+	            LOG.log(Level.INFO, "SYSTEM: (opponent's piece)");
+	            return false;
+	        }
+	    }
+	    
+	    // Check if the piece has valid moves
+	    boolean found = false;
+	    List<Move> touchedMoved = new LinkedList<>();
+	    if (!currentMoves.isEmpty()) {
+	        for (Move m : currentMoves) {
+	            if (m.getPiece().equals(piece)) {
+	                touchedMoved.add(m);
+	                found = true;
+	            }
+	        }
+	    }
+	    
+	    if (!found) {
+	        LOG.log(Level.INFO, "SYSTEM: (not allowed to move)");
+	    } else if (touchedMovedEnabled) {
+	        currentMoves = touchedMoved;
+	    }
+	    
+	    return found;
 	}
 	
 	private Move getMove(Piece piece, Field field) {
@@ -433,7 +452,7 @@ public class Board {
 					endMove();
 				}
 			}
-		}
+		}  
 	}  
 	
 	public void redoMove(Move move) {

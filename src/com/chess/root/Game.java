@@ -377,10 +377,20 @@ public class Game {
 		this.isOnlineGame = true;
 		manager.setGame(this);
 		
-		// Start network listener if not an AI player
-		if (!currentPlayer.isAI()) {
-			startNetworkListener();
+		 // Set the player colors based on host status
+		boolean isHost = manager.isHost();
+		if (isHost) {
+			// Host plays as white
+			whitePlayer.setIsLocal(true);
+			blackPlayer.setIsLocal(false);
+		} else {
+			// Client plays as black
+			whitePlayer.setIsLocal(false);
+			blackPlayer.setIsLocal(true);
 		}
+		
+		// Start network listener
+		startNetworkListener();
 	}
 
 	private void startNetworkListener() {
@@ -394,6 +404,7 @@ public class Game {
 								// Execute opponent's move on our board
 								board.executeMove(move);
 								board.endMove();
+								controller.setDisplay(getPlayer().toString() + "'s turn"); // Update UI after receiving move
 							});
 						} else {
 							break; // Exit if null move received (error occurred)
@@ -425,6 +436,9 @@ public class Game {
 				
 				// Complete move process
 				board.endMove();
+				
+				// Update the display to indicate opponent's turn
+				controller.setDisplay(getPlayer().toString() + "'s turn");
 			} catch (Exception e) {
 				LOG.log(Level.SEVERE, "Failed to send move: {0}", e.getMessage());
 				controller.setDisplay("Failed to send move: " + e.getMessage());
@@ -438,6 +452,25 @@ public class Game {
 
 	public boolean isOnlineGame() {
 		return isOnlineGame;
+	}
+	
+	// Add this method to check if the current player can make a move
+	public boolean canPlayerMove() {
+		if (!isOnlineGame) {
+			// In non-online games, AI can't manually move
+			return !currentPlayer.isAI();
+		} else {
+			// In online games, check if it's the player's turn based on host status
+			boolean isPlayerWhite = !networkManager.isHost(); // Client is black
+			boolean isWhiteTurn = !blackPlayer.equals(currentPlayer);
+			
+			// Player can only move if it's their color's turn
+			return (isPlayerWhite == isWhiteTurn);
+		}
+	}
+	
+	public NetworkManager getNetworkManager() {
+	    return networkManager;
 	}
 	
 	// ---------------------------------- GENERIC GETTERS ----------------------------------

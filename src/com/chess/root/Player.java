@@ -6,6 +6,7 @@ public class Player {
 	private boolean isAI = false;
 	private AIThread thread;
 	private final Object lock = new Object();
+	private boolean isLocal = true;  // By default players are local
 
 	public Player(boolean color){
 		this.color = color;
@@ -37,6 +38,16 @@ public class Player {
 
 	public boolean isBlack() {
 		return color;
+	}
+	
+	// ---------------------------------- LOCAL PLAYER HANDLING ----------------------------------
+
+	public void setIsLocal(boolean isLocal) {
+		this.isLocal = isLocal;
+	}
+
+	public boolean isLocal() {
+		return isLocal;
 	}
 	
 	// ---------------------------------- HELPER METHODS ----------------------------------
