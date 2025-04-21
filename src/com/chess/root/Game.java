@@ -454,6 +454,12 @@ public class Game {
 	    }).start();
 	}
 
+	private void switchPlayerAfterRemoteMove() {
+	    currentPlayer = getOtherPlayer();
+	    board.validateBoard();
+	    controller.displayPlayer(this);
+	}
+
 	public void executeNetworkMove(Move move) {
 	    if (networkManager != null && networkManager.isConnected()) {
 	        try {
