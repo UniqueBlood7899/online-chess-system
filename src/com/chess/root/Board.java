@@ -1058,6 +1058,13 @@ public class Board {
 
 	// Add this overloaded createMove method for network moves
 	public Move createMove(String moveType, Piece piece, Field targetField, Piece victim) {
+	    if (piece == null) {
+	        LOG.log(Level.SEVERE, "Cannot create move: piece is null");
+	        return null;
+	    }
+	    
+	    Field startField = piece.getField();
+	    
 	    // Create the appropriate type of move based on the moveType
 	    switch (moveType) {
 	        case "CastlingMove":

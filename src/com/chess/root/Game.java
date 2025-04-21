@@ -389,67 +389,65 @@ public class Game {
 	        // Host always plays as white
 	        whitePlayer.setIsLocal(true);
 	        blackPlayer.setIsLocal(false);
-	        // Make sure the first turn is white's (host's turn)
+	        // First turn is white's (host's turn)
 	        currentPlayer = whitePlayer;
 	        board.setPlayerColor(false); // false = white plays
 	        controller.setDisplay("White's turn (your move)");
+	        
+	        // Host doesn't need to listen initially since they go first
 	    } else {
 	        // Client always plays as black
 	        whitePlayer.setIsLocal(false);
 	        blackPlayer.setIsLocal(true);
-	        // Make sure the first turn is white's (opponent's turn)
+	        // First turn is white's (opponent's turn)
 	        currentPlayer = whitePlayer;
 	        board.setPlayerColor(false); // false = white plays
 	        controller.setDisplay("White's turn (opponent's move)");
+	        
+	        // Client needs to listen immediately for host's first move
+	        startNetworkListener();
 	    }
 	}
 
 	private void startNetworkListener() {
 	    if (networkManager == null || !networkManager.isConnected()) {
+	        LOG.log(Level.WARNING, "Cannot start network listener: NetworkManager is null or not connected");
 	        return;
 	    }
 	    
 	    new Thread(() -> {
 	        try {
-	            while (networkManager.isConnected()) {
-	                // Wait for a move from the opponent
-	                final Move move = networkManager.receiveMove();
-	                
-	                if (move != null) {
-	                    Platform.runLater(() -> {
-	                        try {
-	                            LOG.log(Level.INFO, "Received opponent's move: {0}", move.getNotation());
-	                            
-	                            // Execute the opponent's move on our board WITHOUT sending it back
-	                            board.executeMove(move);
-	                            
-	                            // Switch players (this should NOT trigger another network listener)
-	                            switchPlayerAfterRemoteMove();
-	                            
-	                            // Now it's our turn, update the UI accordingly
-	                            String displayText = currentPlayer.toString() + "'s turn (your move)";
-	                            controller.setDisplay(displayText);
-	                        } catch (Exception e) {
-	                            LOG.log(Level.SEVERE, "Error processing received move: {0}", e.getMessage());
-	                            controller.setDisplay("Error processing move: " + e.getMessage());
-	                        }
-	                    });
-	                } else {
-	                    break; // Exit if null move received (error occurred)
-	                }
+	            // This is a one-time listener that waits for a single move
+	            LOG.log(Level.INFO, "Waiting for opponent's move...");
+	            final Move move = networkManager.receiveMove();
+	            
+	            if (move != null) {
+	                Platform.runLater(() -> {
+	                    try {
+	                        LOG.log(Level.INFO, "Received opponent's move: {0}", move.getNotation());
+	                        
+	                        // Execute the opponent's move on our board WITHOUT sending it back
+	                        board.executeMove(move);
+	                        board.endMove(); // This will switch to the local player's turn
+	                        
+	                        // Now it's our turn, update the UI accordingly
+	                        String displayText = currentPlayer.toString() + "'s turn (your move)";
+	                        controller.setDisplay(displayText);
+	                    } catch (Exception e) {
+	                        LOG.log(Level.SEVERE, "Error processing received move: {0}", e.getMessage());
+	                        controller.setDisplay("Error processing move: " + e.getMessage());
+	                    }
+	                });
+	            } else {
+	                LOG.log(Level.WARNING, "Received null move from opponent");
 	            }
 	        } catch (Exception e) {
 	            Platform.runLater(() -> {
+	                LOG.log(Level.SEVERE, "Connection error: {0}", e.getMessage());
 	                controller.setDisplay("Connection error: " + e.getMessage());
 	            });
 	        }
 	    }).start();
-	}
-
-	private void switchPlayerAfterRemoteMove() {
-	    currentPlayer = getOtherPlayer();
-	    board.validateBoard();
-	    controller.displayPlayer(this);
 	}
 
 	public void executeNetworkMove(Move move) {
@@ -459,20 +457,16 @@ public class Game {
 	            
 	            // Execute move locally first
 	            board.executeMove(move);
+	            board.endMove(); // This will switch to opponent's turn
 	            
 	            // Send move to opponent
 	            networkManager.sendMove(move);
 	            
-	            // Switch to opponent's turn
-	            currentPlayer = getOtherPlayer();
-	            board.validateBoard();
-	            
 	            // Update UI to show it's opponent's turn
-	            boolean isHost = networkManager.isHost();
 	            String displayText = currentPlayer.toString() + "'s turn (opponent's move)";
 	            controller.setDisplay(displayText);
 	            
-	            // Start listening for opponent's move ONCE after we make our move
+	            // Start listening for opponent's move after we make our move
 	            startNetworkListener();
 	            
 	        } catch (Exception e) {
@@ -497,10 +491,18 @@ public class Game {
 	    } else {
 	        // In online games, determine if it's this player's turn
 	        boolean isHost = networkManager.isHost();
-	        boolean isWhiteTurn = currentPlayer.equals(whitePlayer);
+	        boolean isLocalTurn;
 	        
-	        // Host plays white, client plays black
-	        return (isHost && isWhiteTurn) || (!isHost && !isWhiteTurn);
+	        if (isHost) {
+	            // Host plays as white
+	            isLocalTurn = currentPlayer.equals(whitePlayer);
+	        } else {
+	            // Client plays as black
+	            isLocalTurn = currentPlayer.equals(blackPlayer);
+	        }
+	        
+	        // Can only move if it's the local player's turn
+	        return isLocalTurn;
 	    }
 	}
 

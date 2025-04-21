@@ -242,4 +242,16 @@ public abstract class Piece implements Serializable {
     public void initializeFenCastling(String cas) {
     }
 
+    public boolean canMoveTo(Field targetField) {
+        // Check if this piece can move to the target field
+        List<Move> availableMoves = this.getMoves();
+        if (availableMoves != null) {
+            for (Move move : availableMoves) {
+                if (move.getField().equals(targetField)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 }

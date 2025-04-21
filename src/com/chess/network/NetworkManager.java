@@ -5,9 +5,9 @@ import java.net.*;
 import com.chess.root.moves.Move;
 import com.chess.model.Setting;
 import com.chess.root.Game;
-import com.chess.root.Board; // Add this import
-import com.chess.root.pieces.Piece;
+import com.chess.root.Board;
 import com.chess.root.Field;
+import com.chess.root.pieces.Piece;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -93,21 +93,39 @@ public class NetworkManager {
     public Move receiveMove() {
         try {
             LOG.log(Level.INFO, "Waiting for move...");
-            MoveData moveData = (MoveData) in.readObject();
-            LOG.log(Level.INFO, "Received move data: {0},{1} -> {2},{3}", 
-                new Object[]{moveData.startCol, moveData.startRow, moveData.targetCol, moveData.targetRow});
+            Object receivedObj = in.readObject();
             
-            // Convert the move data back to an actual move
-            Field startField = game.getBoard().getField(moveData.startCol, moveData.startRow);
-            Field targetField = game.getBoard().getField(moveData.targetCol, moveData.targetRow);
-            
-            // Find the piece at the start location or use piece info from moveData
-            Piece piece = startField.getPiece();
-            Piece victim = targetField.getPiece();
-            
-            // Create the appropriate move based on type
-            Move move = game.getBoard().createMove(moveData.moveType, piece, targetField, victim);
-            return move;
+            if (receivedObj instanceof MoveData) {
+                MoveData moveData = (MoveData)receivedObj;
+                LOG.log(Level.INFO, "Received move data: {0},{1} -> {2},{3}", 
+                    new Object[]{moveData.startCol, moveData.startRow, moveData.targetCol, moveData.targetRow});
+                
+                // Find the fields on the board
+                Board board = game.getBoard();
+                Field startField = board.getField(moveData.startCol, moveData.startRow);
+                Field targetField = board.getField(moveData.targetCol, moveData.targetRow);
+                
+                // Get pieces
+                Piece piece = startField.getPiece();
+                Piece victim = targetField.getPiece();
+                
+                // If piece is null (already moved), find a piece of that type that can move to the target
+                if (piece == null) {
+                    for (Piece p : board.getPieces(!isHost)) { // Host is white, client is black
+                        if (p.canMoveTo(targetField)) {
+                            piece = p;
+                            break;
+                        }
+                    }
+                }
+                
+                // Create the move based on the data
+                Move move = board.createMove(moveData.moveType, piece, targetField, victim);
+                return move;
+            } else {
+                LOG.log(Level.SEVERE, "Received object is not a MoveData");
+                return null;
+            }
         } catch (IOException | ClassNotFoundException e) {
             LOG.log(Level.SEVERE, "Failed to receive move: {0}", e.getMessage());
             handleDisconnect();
@@ -168,7 +186,7 @@ public class NetworkManager {
     }
     
     // Simple serializable class to transfer move data
-    static class MoveData implements Serializable {
+    public static class MoveData implements Serializable {
         private static final long serialVersionUID = 1L;
         public int startCol;
         public int startRow;
