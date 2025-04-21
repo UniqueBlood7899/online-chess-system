@@ -419,11 +419,14 @@ public class Game {
 			try {
 				// Execute move locally first
 				board.executeMove(move);
+				
 				// Then send to opponent
 				networkManager.sendMove(move);
+				
 				// Complete move process
 				board.endMove();
 			} catch (Exception e) {
+				LOG.log(Level.SEVERE, "Failed to send move: {0}", e.getMessage());
 				controller.setDisplay("Failed to send move: " + e.getMessage());
 			}
 		} else {

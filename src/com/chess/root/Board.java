@@ -997,4 +997,37 @@ public class Board {
 		}
 	}
 
+	// ---------------------------------- MOVE CREATION ----------------------------------
+
+	public Move createMove(String pieceType, String moveType, Piece piece, Field targetField, Piece victim) {
+		// Create the appropriate type of move based on the moveType
+		switch (moveType) {
+			case "CastlingMove":
+				// Find the rook for castling
+				int rookCol = targetField.getColumn() > piece.getColumn() ? 7 : 0;
+				int rookRow = piece.getRow();
+				Piece rook = getField(rookCol, rookRow).getPiece();
+				
+				// Determine the field where the rook will go
+				int rookTargetCol = targetField.getColumn() > piece.getColumn() ? targetField.getColumn() - 1 : targetField.getColumn() + 1;
+				Field rookTargetField = getField(rookTargetCol, rookRow);
+				
+				return new CastlingMove(piece, rook, targetField, rookTargetField);
+				
+			case "PromotionMove":
+				// Create a new queen for promotion
+				QueenPiece queen = new QueenPiece(this, targetField, piece.getColor(), false);
+				return new PromotionMove(piece, queen, targetField, victim);
+				
+			case "PassingMove":
+				return new PassingMove(piece, targetField, victim);
+				
+			case "PawnRunMove":
+				return new PawnRunMove(piece, targetField, victim);
+				
+			default:
+				// Regular move
+				return new Move(piece, targetField, victim);
+		}
+	}
 }
