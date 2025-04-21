@@ -411,12 +411,17 @@ public class Game {
 
 	private void startNetworkListener() {
 	    if (networkManager == null || !networkManager.isConnected()) {
+	        LOG.log(Level.WARNING, "Cannot start network listener - no connection");
 	        return;
 	    }
 	    
+	    LOG.log(Level.INFO, "Starting network listener for opponent's move");
+	    
 	    new Thread(() -> {
-	        try {
-	            while (networkManager.isConnected()) {
+	        boolean keepListening = true;
+	        
+	        while (keepListening && networkManager != null && networkManager.isConnected()) {
+	            try {
 	                // Wait for a move from the opponent
 	                final Move move = networkManager.receiveMove();
 	                
@@ -442,15 +447,29 @@ public class Game {
 	                            controller.setDisplay("Error processing move: " + e.getMessage());
 	                        }
 	                    });
+	                    
+	                    // Stop listening after receiving one move - we'll start again after our move
+	                    keepListening = false;
 	                } else {
-	                    break; // Exit if null move received (error occurred)
+	                    LOG.log(Level.WARNING, "Null move received, will retry");
+	                    // Short delay before retrying
+	                    Thread.sleep(1000);
+	                }
+	            } catch (InterruptedException e) {
+	                LOG.log(Level.WARNING, "Network listener interrupted");
+	                keepListening = false;
+	            } catch (Exception e) {
+	                LOG.log(Level.SEVERE, "Error in network listener: {0}", e.getMessage());
+	                try {
+	                    // Short delay before retrying
+	                    Thread.sleep(1000);
+	                } catch (InterruptedException ie) {
+	                    keepListening = false;
 	                }
 	            }
-	        } catch (Exception e) {
-	            Platform.runLater(() -> {
-	                controller.setDisplay("Connection error: " + e.getMessage());
-	            });
 	        }
+	        
+	        LOG.log(Level.INFO, "Network listener stopped");
 	    }).start();
 	}
 
@@ -472,23 +491,36 @@ public class Game {
 	            board.endMove();
 	            
 	            // Send move to opponent
-	            networkManager.sendMove(move);
+	            boolean sendSuccessful = true;
+	            try {
+	                networkManager.sendMove(move);
+	            } catch (Exception e) {
+	                LOG.log(Level.SEVERE, "Failed to send move: {0}", e.getMessage());
+	                controller.setDisplay("Failed to send move: " + e.getMessage());
+	                sendSuccessful = false;
+	            }
 	            
 	            // Switch to opponent's turn
 	            currentPlayer = getOtherPlayer();
 	            board.validateBoard();
 	            
 	            // Update UI to show it's opponent's turn
-	            boolean isHost = networkManager.isHost();
-	            String displayText = currentPlayer.toString() + "'s turn (opponent's move)";
+	            String displayText;
+	            if (sendSuccessful) {
+	                displayText = currentPlayer.toString() + "'s turn (opponent's move)";
+	            } else {
+	                displayText = "Network error - move not sent";
+	            }
 	            controller.setDisplay(displayText);
 	            
-	            // Start listening for opponent's move ONCE after we make our move
-	            startNetworkListener();
+	            // Start listening for opponent's move ONLY if send was successful
+	            if (sendSuccessful) {
+	                startNetworkListener();
+	            }
 	            
 	        } catch (Exception e) {
-	            LOG.log(Level.SEVERE, "Failed to send move: {0}", e.getMessage());
-	            controller.setDisplay("Failed to send move: " + e.getMessage());
+	            LOG.log(Level.SEVERE, "Failed to execute network move: {0}", e.getMessage());
+	            controller.setDisplay("Failed to execute move: " + e.getMessage());
 	        }
 	    } else {
 	        // Non-network move
