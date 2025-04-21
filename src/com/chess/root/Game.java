@@ -389,18 +389,23 @@ public class Game {
 	        // Host always plays as white
 	        whitePlayer.setIsLocal(true);
 	        blackPlayer.setIsLocal(false);
-	        // Make sure the first turn is white's (host's turn)
+	        // First turn is white's (host's turn)
 	        currentPlayer = whitePlayer;
 	        board.setPlayerColor(false); // false = white plays
 	        controller.setDisplay("White's turn (your move)");
+	        
+	        // Host doesn't need to listen initially since they go first
 	    } else {
 	        // Client always plays as black
 	        whitePlayer.setIsLocal(false);
 	        blackPlayer.setIsLocal(true);
-	        // Make sure the first turn is white's (opponent's turn)
+	        // First turn is white's (opponent's turn)
 	        currentPlayer = whitePlayer;
 	        board.setPlayerColor(false); // false = white plays
 	        controller.setDisplay("White's turn (opponent's move)");
+	        
+	        // Client needs to listen immediately for host's first move
+	        startNetworkListener();
 	    }
 	}
 
@@ -447,12 +452,6 @@ public class Game {
 	            });
 	        }
 	    }).start();
-	}
-
-	private void switchPlayerAfterRemoteMove() {
-	    currentPlayer = getOtherPlayer();
-	    board.validateBoard();
-	    controller.displayPlayer(this);
 	}
 
 	public void executeNetworkMove(Move move) {
@@ -503,10 +502,18 @@ public class Game {
 	    } else {
 	        // In online games, determine if it's this player's turn
 	        boolean isHost = networkManager.isHost();
-	        boolean isWhiteTurn = currentPlayer.equals(whitePlayer);
+	        boolean isLocalTurn;
 	        
-	        // Host plays white, client plays black
-	        return (isHost && isWhiteTurn) || (!isHost && !isWhiteTurn);
+	        if (isHost) {
+	            // Host plays as white
+	            isLocalTurn = currentPlayer.equals(whitePlayer);
+	        } else {
+	            // Client plays as black
+	            isLocalTurn = currentPlayer.equals(blackPlayer);
+	        }
+	        
+	        // Can only move if it's the local player's turn
+	        return isLocalTurn;
 	    }
 	}
 
