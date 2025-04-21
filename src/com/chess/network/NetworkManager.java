@@ -85,10 +85,17 @@ public class NetworkManager {
                 }
             }
             
+            // Set socket parameters
+            socket.setKeepAlive(true);
+            socket.setTcpNoDelay(true);
+            socket.setSoTimeout(0); // Infinite timeout
+            
             // Create new streams
-            out = new ObjectOutputStream(socket.getOutputStream());
-            out.flush();
-            in = new ObjectInputStream(socket.getInputStream());
+            synchronized (socket) {
+                out = new ObjectOutputStream(new BufferedOutputStream(socket.getOutputStream()));
+                out.flush();
+                in = new ObjectInputStream(new BufferedInputStream(socket.getInputStream()));
+            }
             LOG.log(Level.INFO, "Network streams established");
         } catch (IOException e) {
             LOG.log(Level.SEVERE, "Failed to setup streams: {0}", e.getMessage());
@@ -114,20 +121,22 @@ public class NetworkManager {
             
             // Ensure the connection is stable before sending
             if (socket != null && socket.isConnected() && !socket.isClosed()) {
-                try {
-                    // Check output stream
-                    if (out == null) {
-                        setupStreams();
+                synchronized (out) {
+                    try {
+                        // Check output stream
+                        if (out == null) {
+                            setupStreams();
+                        }
+                        
+                        out.writeObject(moveData);
+                        out.flush();
+                        out.reset(); // This is important to prevent caching of objects
+                        
+                        LOG.log(Level.INFO, "Move sent successfully");
+                    } catch (IOException e) {
+                        LOG.log(Level.SEVERE, "Failed while writing to stream: {0}", e.getMessage());
+                        handleDisconnect();
                     }
-                    
-                    out.writeObject(moveData);
-                    out.flush();
-                    out.reset(); // This is important to prevent caching of objects
-                    
-                    LOG.log(Level.INFO, "Move sent successfully");
-                } catch (IOException e) {
-                    LOG.log(Level.SEVERE, "Failed while writing to stream: {0}", e.getMessage());
-                    handleDisconnect();
                 }
             } else {
                 LOG.log(Level.SEVERE, "Cannot send move: socket is not connected");
@@ -139,116 +148,104 @@ public class NetworkManager {
         }
     }
     
-    public Move receiveMove() {
+    public Move receiveMove() throws IOException {
+        if (!connected || socket == null || socket.isClosed() || in == null) {
+            throw new IOException("Not connected");
+        }
+
         try {
-            LOG.log(Level.INFO, "Waiting for move...");
-            
-            // Ensure socket is connected
-            if (socket == null || !socket.isConnected() || socket.isClosed()) {
-                LOG.log(Level.SEVERE, "Cannot receive move: socket is not connected");
-                handleDisconnect();
-                return null;
-            }
-            
-            // Check if input stream needs to be reset
-            if (in == null) {
-                try {
-                    setupStreams();
-                } catch (IOException e) {
-                    LOG.log(Level.SEVERE, "Failed to setup streams: {0}", e.getMessage());
-                    handleDisconnect();
-                    return null;
-                }
-            }
-            
-            Object receivedObj = in.readObject();
-            
-            // Handle ping messages from keep-alive
-            if (receivedObj instanceof String && "PING".equals(receivedObj)) {
-                LOG.log(Level.FINE, "Received keep-alive ping");
-                // This is a keep-alive ping, not a move - recursively try again
-                return receiveMove();
-            }
-            
-            if (receivedObj instanceof MoveData) {
-                MoveData moveData = (MoveData)receivedObj;
-                LOG.log(Level.INFO, "Received move data: {0},{1} -> {2},{3}", 
-                    new Object[]{moveData.startCol, moveData.startRow, moveData.targetCol, moveData.targetRow});
+            synchronized (in) {
+                LOG.log(Level.INFO, "Waiting for move...");
+                Object received = in.readObject();
                 
-                // Find the fields on the board
-                Board board = game.getBoard();
-                Field startField = board.getField(moveData.startCol, moveData.startRow);
-                Field targetField = board.getField(moveData.targetCol, moveData.targetRow);
-                
-                if (startField == null || targetField == null) {
-                    LOG.log(Level.SEVERE, "Invalid field coordinates received");
-                    return null;
+                // Handle keep-alive PING messages
+                if (received instanceof String) {
+                    String message = (String) received;
+                    if ("PING".equals(message)) {
+                        synchronized (out) {
+                            out.writeObject("PONG");
+                            out.flush();
+                            out.reset();
+                            LOG.log(Level.FINE, "Sent PONG response");
+                        }
+                        // Recursively try to receive the actual move
+                        return receiveMove();
+                    }
                 }
                 
-                // Get pieces
-                Piece piece = startField.getPiece();
-                Piece victim = targetField.getPiece();
-                
-                // If piece is null (already moved), find a piece of that type that can move to the target
-                if (piece == null) {
-                    LOG.log(Level.WARNING, "Piece not found at starting position, trying to find matching piece");
-                    // Determine color of piece to search for - host is white, client is black
-                    boolean pieceColor = isHost; // If host is receiving, then looking for black piece
+                if (received instanceof MoveData) {
+                    MoveData moveData = (MoveData) received;
+                    LOG.log(Level.INFO, "Received move data: {0},{1} -> {2},{3}", 
+                        new Object[]{moveData.startCol, moveData.startRow, moveData.targetCol, moveData.targetRow});
                     
-                    // Search all pieces of the right color
-                    for (Piece p : board.getPieces(pieceColor)) {
-                        if (p.canMoveTo(targetField)) {
-                            piece = p;
-                            LOG.log(Level.INFO, "Found alternative piece that can make the move");
-                            break;
+                    // Find the fields on the board
+                    Board board = game.getBoard();
+                    Field startField = board.getField(moveData.startCol, moveData.startRow);
+                    Field targetField = board.getField(moveData.targetCol, moveData.targetRow);
+                    
+                    if (startField == null || targetField == null) {
+                        LOG.log(Level.SEVERE, "Invalid field coordinates received");
+                        return null;
+                    }
+                    
+                    // Get pieces
+                    Piece piece = startField.getPiece();
+                    Piece victim = targetField.getPiece();
+                    
+                    // If piece is null (already moved), find a piece of that type that can move to the target
+                    if (piece == null) {
+                        LOG.log(Level.WARNING, "Piece not found at starting position, trying to find matching piece");
+                        // Determine color of piece to search for - host is white, client is black
+                        boolean pieceColor = isHost; // If host is receiving, then looking for black piece
+                        
+                        // Search all pieces of the right color
+                        for (Piece p : board.getPieces(pieceColor)) {
+                            if (p.canMoveTo(targetField)) {
+                                piece = p;
+                                LOG.log(Level.INFO, "Found alternative piece that can make the move");
+                                break;
+                            }
+                        }
+                        
+                        if (piece == null) {
+                            LOG.log(Level.SEVERE, "No piece found that can make the move");
+                            return null;
                         }
                     }
                     
-                    if (piece == null) {
-                        LOG.log(Level.SEVERE, "No piece found that can make the move");
+                    // Create the move based on the data
+                    String moveType = moveData.moveType;
+                    if (moveType == null || moveType.isEmpty()) {
+                        moveType = "Move"; // Default to regular move
+                    }
+                    
+                    try {
+                        Move move = board.createMove(moveType, piece, targetField, victim);
+                        if (move == null) {
+                            LOG.log(Level.SEVERE, "Could not create move of type: {0}", moveType);
+                            return null;
+                        }
+                        LOG.log(Level.INFO, "Move processed successfully");
+                        return move;
+                    } catch (Exception e) {
+                        LOG.log(Level.SEVERE, "Error creating move: {0}", e.getMessage());
                         return null;
                     }
-                }
-                
-                // Create the move based on the data
-                String moveType = moveData.moveType;
-                if (moveType == null || moveType.isEmpty()) {
-                    moveType = "Move"; // Default to regular move
-                }
-                
-                try {
-                    Move move = board.createMove(moveType, piece, targetField, victim);
-                    if (move == null) {
-                        LOG.log(Level.SEVERE, "Could not create move of type: {0}", moveType);
-                        return null;
-                    }
-                    LOG.log(Level.INFO, "Move processed successfully");
-                    return move;
-                } catch (Exception e) {
-                    LOG.log(Level.SEVERE, "Error creating move: {0}", e.getMessage());
+                } else {
+                    LOG.log(Level.WARNING, "Received unexpected object type: {0}", 
+                        received != null ? received.getClass().getName() : "null");
                     return null;
                 }
-            } else {
-                LOG.log(Level.SEVERE, "Received object is not a MoveData: {0}", 
-                        receivedObj != null ? receivedObj.getClass().getName() : "null");
-                return null;
             }
-        } catch (EOFException e) {
-            LOG.log(Level.WARNING, "Connection closed by peer");
-            handleDisconnect();
+        } catch (ClassNotFoundException e) {
+            LOG.log(Level.SEVERE, "Failed to deserialize move: {0}", e.getMessage());
             return null;
-        } catch (SocketException e) {
-            LOG.log(Level.WARNING, "Socket error: {0}", e.getMessage());
-            handleDisconnect();
-            return null;
-        } catch (IOException | ClassNotFoundException e) {
-            LOG.log(Level.SEVERE, "Failed to receive move: {0}", e.getMessage());
-            handleDisconnect();
-            return null;
-        } catch (Exception e) {
-            LOG.log(Level.SEVERE, "Unexpected error: {0}", e.getMessage());
-            handleDisconnect();
-            return null;
+        } catch (IOException e) {
+            if (connected) {
+                LOG.log(Level.SEVERE, "Failed to receive move: {0}", e.getMessage());
+                handleDisconnect();
+            }
+            throw e;
         }
     }
     
@@ -369,18 +366,46 @@ public class NetworkManager {
         // Start a new keep-alive thread
         keepAliveThread = new Thread(() -> {
             try {
+                int missedPongs = 0;
                 while (connected && socket != null && !socket.isClosed()) {
                     try {
-                        // Send a ping every 10 seconds
-                        Thread.sleep(10000);
+                        // Send a ping every 5 seconds
+                        Thread.sleep(5000);
                         
                         if (connected && socket != null && !socket.isClosed() && out != null) {
+                            boolean pongReceived = false;
                             synchronized (out) {
-                                // Send a ping message to keep the connection alive
+                                // Send a ping message
                                 out.writeObject("PING");
                                 out.flush();
                                 out.reset();
                                 LOG.log(Level.FINE, "Sent keep-alive ping");
+                            }
+                            
+                            // Wait for PONG response with timeout
+                            try {
+                                synchronized (in) {
+                                    socket.setSoTimeout(3000); // 3 second timeout for pong
+                                    Object response = in.readObject();
+                                    if (response instanceof String && "PONG".equals(response)) {
+                                        pongReceived = true;
+                                        missedPongs = 0;
+                                        LOG.log(Level.FINE, "Received PONG response");
+                                    }
+                                }
+                            } catch (Exception e) {
+                                LOG.log(Level.WARNING, "No PONG response received");
+                            } finally {
+                                socket.setSoTimeout(0); // Reset to infinite timeout
+                            }
+                            
+                            if (!pongReceived) {
+                                missedPongs++;
+                                if (missedPongs >= 3) {
+                                    LOG.log(Level.SEVERE, "Lost connection - no PONG responses");
+                                    handleDisconnect();
+                                    break;
+                                }
                             }
                         }
                     } catch (InterruptedException e) {
@@ -388,22 +413,22 @@ public class NetworkManager {
                         break;
                     } catch (IOException e) {
                         LOG.log(Level.WARNING, "Keep-alive failed: {0}", e.getMessage());
-                        if (connected) {
-                            // Only handle disconnect if we're supposed to be connected
+                        missedPongs++;
+                        if (missedPongs >= 3 || !connected) {
                             handleDisconnect();
+                            break;
                         }
-                        break;
                     }
                 }
             } catch (Exception e) {
                 LOG.log(Level.SEVERE, "Keep-alive thread error: {0}", e.getMessage());
             }
-            LOG.log(Level.FINE, "Keep-alive thread stopped");
+            LOG.log(Level.INFO, "Keep-alive thread stopped");
         });
         
         keepAliveThread.setDaemon(true);
         keepAliveThread.start();
-        LOG.log(Level.FINE, "Keep-alive thread started");
+        LOG.log(Level.INFO, "Keep-alive thread started");
     }
     
     private void stopKeepAlive() {
