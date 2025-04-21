@@ -389,7 +389,7 @@ public class Game {
 	        // Host always plays as white
 	        whitePlayer.setIsLocal(true);
 	        blackPlayer.setIsLocal(false);
-	        // Make sure the first turn is white's
+	        // Make sure the first turn is white's (host's turn)
 	        currentPlayer = whitePlayer;
 	        board.setPlayerColor(false); // false = white plays
 	        controller.setDisplay("White's turn (your move)");
@@ -402,81 +402,78 @@ public class Game {
 	        board.setPlayerColor(false); // false = white plays
 	        controller.setDisplay("White's turn (opponent's move)");
 	    }
-	    
-	    // Start network listener only after setup is complete
-	    startNetworkListener();
 	}
 
 	private void startNetworkListener() {
-	    if (networkManager != null && networkManager.isConnected()) {
-	        new Thread(() -> {
-	            try {
-	                while (networkManager.isConnected()) {
-	                    final Move move = networkManager.receiveMove();
-	                    if (move != null) {
-	                        Platform.runLater(() -> {
-	                            try {
-	                                // Execute the opponent's move on our board
-	                                board.executeMove(move);
-	                                
-	                                // Complete the move process - this switches the current player
-	                                board.endMove();
-	                                
-	                                // Update display to show it's now your turn
-	                                String displayText = getPlayer().toString() + "'s turn";
-	                                if ((networkManager.isHost() && getPlayer().equals(blackPlayer)) || 
-	                                    (!networkManager.isHost() && getPlayer().equals(whitePlayer))) {
-	                                    displayText += " (opponent's move)";
-	                                } else {
-	                                    displayText += " (your move)";
-	                                }
-	                                controller.setDisplay(displayText);
-	                            } catch (Exception e) {
-	                                LOG.log(Level.SEVERE, "Error processing received move: {0}", e.getMessage());
-	                                controller.setDisplay("Error processing move: " + e.getMessage());
-	                            }
-	                        });
-	                    } else {
-	                        break; // Exit if null move received (error occurred)
-	                    }
-	                }
-	            } catch (Exception e) {
-	                Platform.runLater(() -> {
-	                    controller.setDisplay("Connection error: " + e.getMessage());
-	                });
-	            }
-	        }).start();
+	    if (networkManager == null || !networkManager.isConnected()) {
+	        return;
 	    }
+	    
+	    new Thread(() -> {
+	        try {
+	            while (networkManager.isConnected()) {
+	                // Wait for a move from the opponent
+	                final Move move = networkManager.receiveMove();
+	                
+	                if (move != null) {
+	                    Platform.runLater(() -> {
+	                        try {
+	                            LOG.log(Level.INFO, "Received opponent's move: {0}", move.getNotation());
+	                            
+	                            // Execute the opponent's move on our board WITHOUT sending it back
+	                            board.executeMove(move);
+	                            
+	                            // Switch players (this should NOT trigger another network listener)
+	                            switchPlayerAfterRemoteMove();
+	                            
+	                            // Now it's our turn, update the UI accordingly
+	                            String displayText = currentPlayer.toString() + "'s turn (your move)";
+	                            controller.setDisplay(displayText);
+	                        } catch (Exception e) {
+	                            LOG.log(Level.SEVERE, "Error processing received move: {0}", e.getMessage());
+	                            controller.setDisplay("Error processing move: " + e.getMessage());
+	                        }
+	                    });
+	                } else {
+	                    break; // Exit if null move received (error occurred)
+	                }
+	            }
+	        } catch (Exception e) {
+	            Platform.runLater(() -> {
+	                controller.setDisplay("Connection error: " + e.getMessage());
+	            });
+	        }
+	    }).start();
 	}
 
-	public void handleDisconnection() {
-		Platform.runLater(() -> {
-			controller.setDisplay("Opponent disconnected");
-		});
+	private void switchPlayerAfterRemoteMove() {
+	    currentPlayer = getOtherPlayer();
+	    board.validateBoard();
+	    controller.displayPlayer(this);
 	}
 
 	public void executeNetworkMove(Move move) {
 	    if (networkManager != null && networkManager.isConnected()) {
 	        try {
+	            LOG.log(Level.INFO, "Executing local move: {0}", move.getNotation());
+	            
 	            // Execute move locally first
 	            board.executeMove(move);
 	            
 	            // Send move to opponent
 	            networkManager.sendMove(move);
 	            
-	            // Complete move process - this will call switchPlayer() 
-	            // which changes currentPlayer to the opponent's player
-	            board.endMove();
+	            // Switch to opponent's turn
+	            currentPlayer = getOtherPlayer();
+	            board.validateBoard();
 	            
-	            // Update display to show whose turn it is
-	            String displayText = getPlayer().toString() + "'s turn";
-	            if ((networkManager.isHost() && getPlayer().equals(blackPlayer)) || 
-	                (!networkManager.isHost() && getPlayer().equals(whitePlayer))) {
-	                displayText += " (opponent's move)";
-	            } else {
-	                displayText += " (your move)";
-	            }
+	            // Update UI to show it's opponent's turn
+	            boolean isHost = networkManager.isHost();
+	            String displayText = currentPlayer.toString() + "'s turn (opponent's move)";
 	            controller.setDisplay(displayText);
+	            
+	            // Start listening for opponent's move ONCE after we make our move
+	            startNetworkListener();
 	            
 	        } catch (Exception e) {
 	            LOG.log(Level.SEVERE, "Failed to send move: {0}", e.getMessage());
@@ -493,7 +490,6 @@ public class Game {
 		return isOnlineGame;
 	}
 	
-	// Replace the canPlayerMove method with this correct version
 	public boolean canPlayerMove() {
 	    if (!isOnlineGame) {
 	        // In non-online games, human players can move during their turn
@@ -508,7 +504,6 @@ public class Game {
 	    }
 	}
 
-	// Add this helper method
 	private boolean blackPlays() {
 		return currentPlayer.equals(blackPlayer);
 	}
@@ -527,5 +522,32 @@ public class Game {
  		return board;
  	}
 
+	// Add this method to the Game class to handle network disconnection
+	public void handleDisconnection() {
+	    Platform.runLater(() -> {
+	        isOnlineGame = false;
+	        
+	        // Show disconnection message to user
+	        controller.setDisplay("Opponent disconnected. Game ended.");
+	        
+	        // End the game without a winner
+	        gameEnded = true;
+	        controller.setGoBut(false);
+	        controller.setForwardBut(false);
+	        
+	        // Log the disconnection
+	        LOG.log(Level.INFO, "SYSTEM: ---------- game ends due to disconnection ----------");
+	        
+	        // Clean up network resources
+	        try {
+	            if (networkManager != null) {
+	                networkManager.close();
+	                networkManager = null;
+	            }
+	        } catch (IOException e) {
+	            LOG.log(Level.SEVERE, "Error closing network connection: {0}", e.getMessage());
+	        }
+	    });
+	}
 
 }
