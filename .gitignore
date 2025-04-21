@@ -1,0 +1,90 @@
+### Java ###
+# Compiled class files
+*.class
+target/
+classes/
+
+# Package files
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# Exception for specific jar files (if needed)
+!classes/artifacts/chess_jar/chess.jar
+
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+
+# IDE - Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# IDE - IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+*.iws
+.idea_modules/
+
+# IDE - VS Code
+.vscode/
+.code-workspace
+
+# IDE - NetBeans
+nbproject/private/
+build/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# Logs
+*.log
+log/
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~.nib
+*.save
+*.userPrefs
+
+# Project specific
+# Chess-specific temporary files
+chess_screenshots_*
+chess_rules.html
+chess_manual.html
+chess_game.pgn
+
+# JVM crash logs
+hs_err_pid*
+replay_pid*
+
+# Network specific
+.socket/
