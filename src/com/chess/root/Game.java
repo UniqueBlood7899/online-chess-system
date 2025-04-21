@@ -171,9 +171,14 @@ public class Game {
 		switchPlayerSilently();
 		board.validateBoard();
 		
+		// Only start network listener if we're in online mode and it's the remote player's turn
 		if (isOnlineGame) {
-			// Start listening for opponent's move
-			if (!currentPlayer.isAI()) {
+			boolean isHost = networkManager.isHost();
+			boolean isRemoteTurn = (isHost && currentPlayer.equals(blackPlayer)) || 
+			                     (!isHost && currentPlayer.equals(whitePlayer));
+			
+			// Start network listener only when it's the remote player's turn
+			if (isRemoteTurn) {
 				startNetworkListener();
 			}
 		} else {
@@ -410,12 +415,26 @@ public class Game {
 	                    final Move move = networkManager.receiveMove();
 	                    if (move != null) {
 	                        Platform.runLater(() -> {
-	                            // Execute the opponent's move on our board
-	                            board.executeMove(move);
-	                            // Complete the move process
-	                            board.endMove();
-	                            // Update the UI
-	                            controller.setDisplay(getPlayer().toString() + "'s turn");
+	                            try {
+	                                // Execute the opponent's move on our board
+	                                board.executeMove(move);
+	                                
+	                                // Complete the move process - this switches the current player
+	                                board.endMove();
+	                                
+	                                // Update display to show it's now your turn
+	                                String displayText = getPlayer().toString() + "'s turn";
+	                                if ((networkManager.isHost() && getPlayer().equals(blackPlayer)) || 
+	                                    (!networkManager.isHost() && getPlayer().equals(whitePlayer))) {
+	                                    displayText += " (opponent's move)";
+	                                } else {
+	                                    displayText += " (your move)";
+	                                }
+	                                controller.setDisplay(displayText);
+	                            } catch (Exception e) {
+	                                LOG.log(Level.SEVERE, "Error processing received move: {0}", e.getMessage());
+	                                controller.setDisplay("Error processing move: " + e.getMessage());
+	                            }
 	                        });
 	                    } else {
 	                        break; // Exit if null move received (error occurred)
@@ -445,8 +464,19 @@ public class Game {
 	            // Send move to opponent
 	            networkManager.sendMove(move);
 	            
-	            // Complete move process
+	            // Complete move process - this will call switchPlayer() 
+	            // which changes currentPlayer to the opponent's player
 	            board.endMove();
+	            
+	            // Update display to show whose turn it is
+	            String displayText = getPlayer().toString() + "'s turn";
+	            if ((networkManager.isHost() && getPlayer().equals(blackPlayer)) || 
+	                (!networkManager.isHost() && getPlayer().equals(whitePlayer))) {
+	                displayText += " (opponent's move)";
+	            } else {
+	                displayText += " (your move)";
+	            }
+	            controller.setDisplay(displayText);
 	            
 	        } catch (Exception e) {
 	            LOG.log(Level.SEVERE, "Failed to send move: {0}", e.getMessage());
