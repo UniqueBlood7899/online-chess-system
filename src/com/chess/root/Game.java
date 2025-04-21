@@ -423,6 +423,9 @@ public class Game {
 	                            // Execute the opponent's move on our board WITHOUT sending it back
 	                            board.executeMove(move);
 	                            
+	                            // Add endMove to update the move counter
+	                            board.endMove();
+	                            
 	                            // Switch players (this should NOT trigger another network listener)
 	                            switchPlayerAfterRemoteMove();
 	                            
@@ -459,6 +462,9 @@ public class Game {
 	            
 	            // Execute move locally first
 	            board.executeMove(move);
+	            
+	            // Add endMove to update the move counter
+	            board.endMove();
 	            
 	            // Send move to opponent
 	            networkManager.sendMove(move);
